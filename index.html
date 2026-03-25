@@ -106,8 +106,12 @@
             }, [supabase]);
 
             const getUrl = (path) => {
-                if (!path || !supabase) return "";
+                if (!path) return "";
+                // 1. 如果路径已经是 http 或 https 开头（比如腾讯云直链），直接返回
                 if (path.startsWith('http')) return path;
+                
+                // 2. 如果不是 HTTP 开头，则按原逻辑从 Supabase Storage 获取
+                if (!supabase) return "";
                 const { data } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path);
                 return data?.publicUrl || "";
             };
