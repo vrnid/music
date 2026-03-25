@@ -46,7 +46,7 @@
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNqam1rdW50a2tib3RneGRucXJiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ0MDEwMzUsImV4cCI6MjA4OTk3NzAzNX0.071Yx59ehlvAsvDffLAJP4AGyNymFUZUYX8JnhpZSS4';
         const STORAGE_BUCKET = 'music-space';
 
-        // 原生 SVG 图标
+        // 原生 SVG 图标组件
         const SvgIcon = ({ type, className = "" }) => {
             const icons = {
                 play: <path d="m7 3 14 9-14 9V3z" />,
@@ -165,9 +165,17 @@
 
             const handleTimeUpdate = () => {
                 if (!audioRef.current) return;
-                const time = audioRef.current.currentTime;
-                setCurrentTime(time);
-                const index = parsedLyrics.findIndex((item, i) => time >= item.time && (!parsedLyrics[i + 1] || time < parsedLyrics[i + 1].time));
+                
+                // --- 歌词同步修正逻辑 ---
+                const rawTime = audioRef.current.currentTime;
+                // 仅在移动端（宽度 < 1024px）应用 0.5 秒的提前量，桌面端补偿为 0
+                const offset = window.innerWidth < 1024 ? 0.5 : 0;
+                const syncTime = rawTime + offset;
+                
+                setCurrentTime(rawTime); // 进度条依然显示音频真实时间
+                
+                const index = parsedLyrics.findIndex((item, i) => syncTime >= item.time && (!parsedLyrics[i + 1] || syncTime < parsedLyrics[i + 1].time));
+                
                 if (index !== -1 && index !== activeLyricIndex) {
                     setActiveLyricIndex(index);
                     if (lyricContainerRef.current) {
@@ -201,12 +209,10 @@
                 setView('player');
                 requestAnimationFrame(() => {
                     requestAnimationFrame(() => {
-                        
                         if (playerCoverRef.current && playerCoverRef.current.offsetParent !== null) {
                             setTargetRect(playerCoverRef.current.getBoundingClientRect());
                             setAnimStage('moving');
                         } else {
-                            // 移动端直接进入不播放位移动画
                             setAnimStage('none');
                             setActiveId(null);
                         }
@@ -234,7 +240,7 @@
                         style={{ backgroundImage: currentCoverUrl ? `url(${currentCoverUrl})` : 'none' }}
                     />
 
-                    {/* 过场飞入层 */}
+                    {/* 飞行过场层 */}
                     {animStage !== 'none' && startRect && (
                         <div onTransitionEnd={() => animStage === 'moving' && setAnimStage('none')}
                             className="fixed z-[100] pointer-events-none overflow-hidden"
@@ -292,18 +298,15 @@
 
                         {/* 播放详情视图 */}
                         <section className={`absolute inset-0 px-4 md:px-8 py-4 transition-all duration-700 flex flex-col ${view === 'player' ? 'opacity-100' : 'opacity-0 invisible pointer-events-none'}`}>
-                            {/* 返回按钮 */}
                             <button onClick={backToGallery} className="relative z-50 mb-4 flex items-center gap-3 text-zinc-500 hover:text-white group">
                                 <div className="w-8 h-8 md:w-10 md:h-10 rounded-full border border-white/10 flex items-center justify-center group-hover:bg-white/5">
                                     <SvgIcon type="arrowLeft" className="w-4 h-4 md:w-5 md:h-5" />
                                 </div>
-                                <span className="font-bold text-[10px] tracking-widest uppercase">BACK GALLERY</span>
+                                <span className="font-bold text-[10px] tracking-widest uppercase">BACK</span>
                             </button>
 
-                         
                             <div className="flex-1 flex flex-col lg:flex-row gap-4 lg:gap-8 items-center lg:items-start overflow-hidden h-full">
                                 
-                                {/* 歌词区域：移动端位于上方，占据主要空间 */}
                                 <div className={`flex-1 w-full lg:w-[60%] h-[50vh] lg:h-[750px] flex flex-col transition-all duration-1000 ${animStage !== 'none' ? 'opacity-0 blur-sm' : 'opacity-100 blur-0'}`}>
                                     <div ref={lyricContainerRef} className="flex-1 overflow-y-auto no-scrollbar lyric-mask pt-[10vh] pb-[25vh] space-y-8 md:space-y-14" >
                                         {parsedLyrics.length > 0 ? parsedLyrics.map((line, index) => (
@@ -314,20 +317,16 @@
                                     </div>
                                 </div>
 
-                                {/* 控制面板区域：移动端位于下方 */}
                                 <div className="w-full lg:w-[40%] flex flex-col items-center justify-end lg:justify-start shrink-0 pb-6 md:pb-10 lg:pb-0 h-auto">
-                                    {/* 【关键修复点】移动端隐藏图片: hidden lg:block */}
                                     <div ref={playerCoverRef} className={`hidden lg:block w-64 h-64 lg:w-[320px] lg:h-[320px] rounded-[3rem] overflow-hidden shadow-2xl border border-white/10 mb-10 ${animStage === 'none' ? 'opacity-100 visible' : 'opacity-0 invisible'}`}>
                                         <img src={currentCoverUrl} className="w-full h-full object-cover" />
                                     </div>
                                     
-                                    {/* 信息与控制按钮 */}
                                     <div className={`text-center w-full transition-all duration-700 ${animStage !== 'none' ? 'translate-y-10 opacity-0' : 'translate-y-0 opacity-100'}`}>
                                         <h2 className="text-xl md:text-4xl font-black mb-1 uppercase tracking-tighter leading-tight truncate px-4">{currentSong?.title}</h2>
                                         <p className="text-emerald-500 text-[10px] md:text-sm font-bold mb-4 md:mb-8 tracking-[0.4em] uppercase opacity-80 truncate px-4">{currentSong?.artist}</p>
                                         
                                         <div className="bg-white/[0.03] p-5 md:p-10 rounded-[2rem] md:rounded-[2.5rem] border border-white/[0.05] backdrop-blur-3xl shadow-xl w-full max-w-[420px] mx-auto">
-                                            {/* 时间显示文字 */}
                                             <div className="flex items-center gap-4 text-sm md:text-2xl font-black font-mono text-zinc-300 tracking-widest mb-6 md:mb-10">
                                                 <span className="w-14">{Math.floor(currentTime/60)}:{(currentTime%60).toFixed(0).padStart(2, '0')}</span>
                                                 <div className="flex-1 h-[4px] bg-white/10 rounded-full overflow-hidden cursor-pointer" onClick={(e) => {
@@ -340,7 +339,6 @@
                                                 <span className="w-14">{Math.floor(duration/60)}:{(duration%60).toFixed(0).padStart(2, '0')}</span>
                                             </div>
                                             
-                                            {/* 播放按钮 */}
                                             <div className="flex items-center justify-center gap-8 md:gap-14">
                                                 <div className="cursor-pointer text-zinc-700 hover:text-white transition-colors active:scale-90 p-2" onClick={() => setCurrentIndex(prev => (prev > 0 ? prev - 1 : songs.length - 1))}>
                                                     <SvgIcon type="skipBack" className="w-7 h-7 md:w-8 md:h-8" />
