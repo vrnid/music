@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Sonic Space - 音乐专辑空间</title>
     <!-- 引入 Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -10,19 +10,31 @@
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <!-- 引入 Lucide 图标 -->
-    <script src="https://unpkg.com/lucide@latest"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
-        body { font-family: 'Inter', sans-serif; background: black; }
+        body { 
+            font-family: 'Inter', sans-serif; 
+            background: black; 
+            overscroll-behavior-y: contain; /* 防止移动端下拉刷新 */
+        }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         @keyframes spin-slow { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .animate-spin-slow { animation: spin-slow 40s linear infinite; }
+        
+        /* 进度条滑块样式 */
         input[type='range']::-webkit-slider-thumb {
             -webkit-appearance: none;
-            height: 12px; width: 12px; border-radius: 50%;
+            height: 16px; width: 16px; border-radius: 50%;
             background: #10b981; cursor: pointer;
+            box-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
+            border: 2px solid white;
+        }
+
+        /* 歌词遮罩效果 */
+        .lyric-mask {
+            mask-image: linear-gradient(to bottom, transparent, black 20%, black 70%, transparent);
+            -webkit-mask-image: linear-gradient(to bottom, transparent, black 20%, black 70%, transparent);
         }
     </style>
 </head>
@@ -36,14 +48,21 @@
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNqam1rdW50a2tib3RneGRucXJiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ0MDEwMzUsImV4cCI6MjA4OTk3NzAzNX0.071Yx59ehlvAsvDffLAJP4AGyNymFUZUYX8JnhpZSS4';
         const STORAGE_BUCKET = 'music-space';
 
-        // 图标组件包装
-        const Icon = ({ name, ...props }) => {
-            useEffect(() => {
-                if (window.lucide) {
-                    window.lucide.createIcons();
-                }
-            }, [name]);
-            return <i data-lucide={name} {...props}></i>;
+        // 内置 SVG 图标组件
+        const SvgIcon = ({ type, className = "" }) => {
+            const icons = {
+                play: <path d="m7 3 14 9-14 9V3z" />,
+                pause: <path d="M6 4h4v16H6zm8 0h4v16h-4z" />,
+                skipBack: <path d="M19 20L9 12l10-8v16zM5 19V5h2v14H5z" />,
+                skipForward: <path d="M5 4l10 8-10 8V4zm14 1v14h-2V5h2z" />,
+                arrowLeft: <path d="m12 19-7-7 7-7M5 12h14" />,
+                disc: <path d="M12 12m-9 0a9 9 0 1 0 18 0a9 9 0 1 0 -18 0M12 12m-3 0a3 3 0 1 0 6 0a3 3 0 1 0 -6 0" />
+            };
+            return (
+                <svg viewBox="0 0 24 24" fill="currentColor" className={className} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    {icons[type]}
+                </svg>
+            );
         };
 
         const App = () => {
@@ -56,6 +75,7 @@
             const [startRect, setStartRect] = useState(null);
             const [targetRect, setTargetRect] = useState(null);
             const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+            
             const [isPlaying, setIsPlaying] = useState(false);
             const [currentTime, setCurrentTime] = useState(0);
             const [duration, setDuration] = useState(0);
@@ -63,14 +83,11 @@
             const [remoteLyricText, setRemoteLyricText] = useState("");
             const [isLyricLoading, setIsLyricLoading] = useState(false);
             const [volume, setVolume] = useState(0.2);
-            const [isMuted, setIsMuted] = useState(false);
-            const [prevVolume, setPrevVolume] = useState(0.2);
 
             const audioRef = useRef(null);
             const lyricContainerRef = useRef(null);
             const playerCoverRef = useRef(null);
 
-            // 初始化 Supabase
             useEffect(() => {
                 const script = document.createElement('script');
                 script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js';
@@ -88,13 +105,7 @@
             };
 
             useEffect(() => {
-                if (supabase) {
-                    fetchSongs();
-                    const channel = supabase.channel('realtime_songs').on('postgres_changes', 
-                        { event: '*', schema: 'public', table: 'songs' }, () => fetchSongs()
-                    ).subscribe();
-                    return () => supabase.removeChannel(channel);
-                }
+                if (supabase) fetchSongs();
             }, [supabase]);
 
             const getUrl = (path) => {
@@ -145,13 +156,13 @@
                 }).filter(Boolean);
             }, [remoteLyricText]);
 
-            // 切歌重置
             useEffect(() => {
                 setCurrentTime(0);
                 if (audioRef.current) {
-                    audioRef.current.volume = isMuted ? 0 : volume;
+                    audioRef.current.volume = volume;
                     if (isPlaying) {
-                        audioRef.current.play().catch(e => console.log("Auto-play blocked"));
+                        const playPromise = audioRef.current.play();
+                        if (playPromise !== undefined) playPromise.catch(() => {});
                     }
                 }
             }, [currentIndex, currentAudioUrl]);
@@ -166,9 +177,8 @@
                     if (lyricContainerRef.current) {
                         const activeLine = lyricContainerRef.current.children[index];
                         if (activeLine) {
-                            const containerHeight = lyricContainerRef.current.offsetHeight;
                             lyricContainerRef.current.scrollTo({
-                                top: activeLine.offsetTop - containerHeight * 0.35,
+                                top: activeLine.offsetTop - lyricContainerRef.current.offsetHeight * 0.35,
                                 behavior: 'smooth'
                             });
                         }
@@ -179,7 +189,8 @@
             const togglePlay = () => {
                 if (!audioRef.current) return;
                 if (audioRef.current.paused) {
-                    audioRef.current.play();
+                    const playPromise = audioRef.current.play();
+                    if (playPromise !== undefined) playPromise.catch(() => {});
                 } else {
                     audioRef.current.pause();
                 }
@@ -203,6 +214,11 @@
                 });
             };
 
+            const backToGallery = () => {
+                setView('home');
+                setActiveId(null);
+            };
+
             useEffect(() => {
                 const handleMouseMove = (e) => setMousePos({ x: e.clientX, y: e.clientY });
                 window.addEventListener('mousemove', handleMouseMove);
@@ -211,6 +227,7 @@
 
             return (
                 <div className="min-h-screen bg-black text-white selection:bg-emerald-500/30 overflow-hidden relative">
+                    {/* 背景氛围 */}
                     <div className="pointer-events-none fixed inset-0 z-0 transition-all duration-1000"
                         style={{ background: `radial-gradient(circle at ${mousePos.x}px ${mousePos.y}px, rgba(16, 185, 129, ${view === 'home' ? 0.05 : 0.15}) 0%, transparent 40%)` }}
                     />
@@ -218,6 +235,7 @@
                         style={{ backgroundImage: currentCoverUrl ? `url(${currentCoverUrl})` : 'none' }}
                     />
 
+                    {/* 飞行过场层 */}
                     {animStage !== 'none' && startRect && (
                         <div onTransitionEnd={() => animStage === 'moving' && setAnimStage('none')}
                             className="fixed z-[100] pointer-events-none overflow-hidden"
@@ -226,7 +244,7 @@
                                 left: animStage === 'moving' && targetRect ? targetRect.left : startRect.left,
                                 width: animStage === 'moving' && targetRect ? targetRect.width : startRect.width,
                                 height: animStage === 'moving' && targetRect ? targetRect.height : startRect.height,
-                                borderRadius: animStage === 'moving' && targetRect ? '3rem' : '2.5rem',
+                                borderRadius: animStage === 'moving' && targetRect ? '3rem' : '1.5rem',
                                 boxShadow: '0 40px 80px rgba(0,0,0,0.8)',
                                 transition: animStage === 'moving' ? 'all 0.65s cubic-bezier(0.16, 1, 0.3, 1)' : 'none'
                             }}>
@@ -234,86 +252,100 @@
                         </div>
                     )}
 
-                    <nav className="relative z-50 flex items-center justify-between px-8 py-6 backdrop-blur-md border-b border-white/5">
+                    <nav className="relative z-50 flex items-center justify-between px-6 md:px-8 py-4 md:py-6 backdrop-blur-md border-b border-white/5">
                         <div className="flex items-center gap-3 select-none">
                             <div className="w-8 h-8 bg-emerald-500 rounded-xl flex items-center justify-center text-black shadow-lg">
-                                <Icon name="disc" className="animate-spin-slow w-5 h-5" />
+                                <SvgIcon type="disc" className="animate-spin-slow w-5 h-5" />
                             </div>
                             <span className="font-black text-lg tracking-tighter uppercase italic leading-none">Sonic Space</span>
                         </div>
                     </nav>
 
-                    <div className="relative z-10 w-full h-[calc(100vh-84px)]">
-                        <section className={`absolute inset-0 px-6 md:px-8 py-10 max-w-7xl mx-auto overflow-y-auto no-scrollbar transition-all duration-700 ${view === 'home' ? 'opacity-100 scale-100' : 'opacity-0 scale-95 blur-lg pointer-events-none'}`}>
-                            <header className="mb-12 text-center">
-                                <h2 className="text-5xl md:text-7xl font-black mb-4 tracking-tighter uppercase italic">Gallery</h2>
+                    <div className="relative z-10 w-full h-[calc(100vh-68px)] md:h-[calc(100vh-84px)]">
+                        {/* 列表页 */}
+                        <section className={`absolute inset-0 px-4 md:px-8 py-6 md:py-10 max-w-7xl mx-auto overflow-y-auto no-scrollbar transition-all duration-700 ${view === 'home' ? 'opacity-100 scale-100' : 'opacity-0 scale-95 blur-lg pointer-events-none'}`}>
+                            <header className="mb-8 md:mb-12 text-center">
+                                <h2 className="text-4xl md:text-7xl font-black mb-3 md:mb-4 tracking-tighter uppercase italic opacity-90">Gallery</h2>
                                 <div className="flex items-center justify-center gap-4 text-zinc-500 font-bold uppercase tracking-[0.4em] text-[10px]">
-                                    <div className="w-12 h-[2px] bg-emerald-500" />
-                                    <span>精选数字唱片</span>
+                                    <div className="w-8 md:w-12 h-[2px] bg-emerald-500" />
+                                    <span>精选唱片档案</span>
                                 </div>
                             </header>
-                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 md:gap-8 pb-32">
+                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-8 pb-32">
                                 {songs.map((song, index) => (
                                     <div key={song.id} className="group relative cursor-pointer" onClick={(e) => selectSong(index, e)}>
-                                        <div className={`album-img relative aspect-square rounded-[2rem] md:rounded-[2.5rem] overflow-hidden transition-all duration-300 shadow-xl border border-white/5 ${activeId === song.id ? 'opacity-0' : 'opacity-100 group-hover:scale-[1.03]'}`}>
+                                        <div className={`album-img relative aspect-square rounded-[1.5rem] md:rounded-[2.5rem] overflow-hidden transition-all duration-300 shadow-xl border border-white/5 ${activeId === song.id ? 'opacity-0' : 'opacity-100 group-hover:scale-[1.03]'}`}>
                                             <img src={getUrl(song.cover_path)} className="w-full h-full object-cover" />
                                             <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                                <div className="w-12 h-12 bg-white/10 rounded-full flex items-center justify-center border border-white/20"><Icon name="play" className="w-5 h-5 fill-current" /></div>
+                                                <div className="w-10 h-10 md:w-12 md:h-12 bg-white/10 rounded-full flex items-center justify-center border border-white/20">
+                                                    <SvgIcon type="play" className="w-4 h-4 md:w-5 md:h-5" />
+                                                </div>
                                             </div>
                                         </div>
-                                        <div className="mt-4 text-center">
-                                            <h3 className="font-bold text-lg uppercase leading-tight">{song.title}</h3>
-                                            <p className="text-zinc-600 text-[10px] font-bold uppercase tracking-widest">{song.artist}</p>
+                                        <div className="mt-3 md:mt-4 text-center">
+                                            <h3 className="font-bold text-base md:text-lg uppercase tracking-tight truncate">{song.title}</h3>
+                                            <p className="text-zinc-600 text-[10px] font-bold uppercase tracking-widest truncate">{song.artist}</p>
                                         </div>
                                     </div>
                                 ))}
                             </div>
                         </section>
 
-                        <section className={`absolute inset-0 px-6 md:px-8 py-6 transition-all duration-700 ${view === 'player' ? 'opacity-100' : 'opacity-0 invisible pointer-events-none'}`}>
-                            <button onClick={() => { setView('home'); }} className="relative z-50 mb-4 flex items-center gap-3 text-zinc-500 hover:text-white group">
-                                <div className="w-10 h-10 rounded-full border border-white/10 flex items-center justify-center group-hover:bg-white/5"><Icon name="arrow-left" className="w-5 h-5" /></div>
+                        {/* 播放页：移动端反转布局 */}
+                        <section className={`absolute inset-0 px-4 md:px-8 py-4 transition-all duration-700 flex flex-col ${view === 'player' ? 'opacity-100' : 'opacity-0 invisible pointer-events-none'}`}>
+                            <button onClick={backToGallery} className="relative z-50 mb-4 flex items-center gap-3 text-zinc-500 hover:text-white group">
+                                <div className="w-8 h-8 md:w-10 md:h-10 rounded-full border border-white/10 flex items-center justify-center group-hover:bg-white/5">
+                                    <SvgIcon type="arrowLeft" className="w-4 h-4 md:w-5 md:h-5" />
+                                </div>
                                 <span className="font-bold text-[10px] tracking-widest uppercase">BACK</span>
                             </button>
 
-                            <div className="flex flex-col-reverse lg:flex-row gap-8 items-center lg:items-start h-full">
-                                <div className="w-full lg:w-[40%] flex flex-col items-center shrink-0">
-                                    <div ref={playerCoverRef} className={`w-48 h-48 md:w-64 md:h-64 lg:w-[320px] lg:h-[320px] rounded-[2.5rem] md:rounded-[3rem] overflow-hidden shadow-2xl border border-white/10 ${animStage === 'none' ? 'opacity-100 visible' : 'opacity-0 invisible'}`}>
+                            <div className="flex-1 flex flex-col-reverse lg:flex-row gap-6 lg:gap-8 items-center lg:items-start overflow-hidden">
+                                {/* 下方：控制区 */}
+                                <div className="w-full lg:w-[40%] flex flex-col items-center shrink-0 pb-8 lg:pb-0">
+                                    <div ref={playerCoverRef} className={`w-40 h-40 md:w-64 md:h-64 lg:w-[320px] lg:h-[320px] rounded-[2.5rem] md:rounded-[3rem] overflow-hidden shadow-2xl border border-white/10 ${animStage === 'none' ? 'opacity-100 visible' : 'opacity-0 invisible'}`}>
                                         <img src={currentCoverUrl} className="w-full h-full object-cover" />
                                     </div>
-                                    <div className={`mt-6 text-center transition-all duration-700 ${animStage !== 'none' ? 'translate-y-10 opacity-0' : 'translate-y-0 opacity-100'}`}>
-                                        <h2 className="text-2xl md:text-4xl font-black mb-1 uppercase leading-tight">{currentSong?.title}</h2>
-                                        <p className="text-emerald-500 text-xs md:text-sm font-bold mb-6 tracking-widest uppercase">{currentSong?.artist}</p>
-                                        <div className="bg-white/[0.03] p-6 md:p-8 rounded-[2rem] border border-white/[0.05] backdrop-blur-3xl shadow-xl w-80 md:w-96">
-                                            <div className="flex items-center gap-4 text-xs font-bold font-mono text-zinc-500 tracking-widest mb-6">
-                                                <span>{Math.floor(currentTime/60)}:{(currentTime%60).toFixed(0).padStart(2, '0')}</span>
-                                                <div className="flex-1 h-[3px] bg-white/5 rounded-full overflow-hidden cursor-pointer" onClick={(e) => {
+                                    <div className={`mt-6 md:mt-8 text-center transition-all duration-700 w-full ${animStage !== 'none' ? 'translate-y-10 opacity-0' : 'translate-y-0 opacity-100'}`}>
+                                        <h2 className="text-xl md:text-4xl font-black mb-1 uppercase tracking-tighter leading-tight truncate px-4">{currentSong?.title}</h2>
+                                        <p className="text-emerald-500 text-[10px] md:text-sm font-bold mb-6 md:mb-8 tracking-[0.4em] uppercase opacity-80 truncate px-4">{currentSong?.artist}</p>
+                                        
+                                        <div className="bg-white/[0.03] p-6 md:p-10 rounded-[2rem] md:rounded-[2.5rem] border border-white/[0.05] backdrop-blur-3xl shadow-xl w-full max-w-[420px] mx-auto">
+                                            <div className="flex items-center gap-4 text-sm md:text-xl font-black font-mono text-zinc-300 tracking-widest mb-6 md:mb-8">
+                                                <span className="w-12">{Math.floor(currentTime/60)}:{(currentTime%60).toFixed(0).padStart(2, '0')}</span>
+                                                <div className="flex-1 h-[4px] bg-white/10 rounded-full overflow-hidden cursor-pointer" onClick={(e) => {
                                                     const rect = e.currentTarget.getBoundingClientRect();
                                                     const pct = (e.clientX - rect.left) / rect.width;
                                                     if(audioRef.current) audioRef.current.currentTime = pct * duration;
                                                 }}>
-                                                    <div className="h-full bg-emerald-500" style={{ width: `${(currentTime/duration)*100 || 0}%` }} />
+                                                    <div className="h-full bg-emerald-500 shadow-[0_0_10px_#10b981]" style={{ width: `${(currentTime/duration)*100 || 0}%` }} />
                                                 </div>
-                                                <span>{Math.floor(duration/60)}:{(duration%60).toFixed(0).padStart(2, '0')}</span>
+                                                <span className="w-12">{Math.floor(duration/60)}:{(duration%60).toFixed(0).padStart(2, '0')}</span>
                                             </div>
-                                            <div className="flex items-center justify-center gap-10">
-                                                <Icon name="skip-back" className="w-6 h-6 text-zinc-700 cursor-pointer active:scale-90" onClick={() => setCurrentIndex(prev => (prev > 0 ? prev - 1 : songs.length - 1))} />
-                                                <button onClick={togglePlay} className="w-12 h-12 bg-white text-black rounded-full flex items-center justify-center shadow-xl active:scale-90 transition-transform">
-                                                    <Icon name={isPlaying ? "pause" : "play"} className={`w-6 h-6 ${!isPlaying && 'ml-1'}`} fill="currentColor" />
+                                            
+                                            <div className="flex items-center justify-center gap-8 md:gap-12">
+                                                <div className="cursor-pointer text-zinc-700 hover:text-white transition-colors active:scale-90 p-2" onClick={() => setCurrentIndex(prev => (prev > 0 ? prev - 1 : songs.length - 1))}>
+                                                    <SvgIcon type="skipBack" className="w-6 h-6 md:w-7 md:h-7" />
+                                                </div>
+                                                <button onClick={togglePlay} className="w-12 h-12 md:w-14 md:h-14 bg-white text-black rounded-full flex items-center justify-center shadow-2xl active:scale-90 transition-all hover:scale-105">
+                                                    <SvgIcon type={isPlaying ? "pause" : "play"} className={`w-6 h-6 md:w-7 md:h-7 ${!isPlaying && 'ml-1'}`} />
                                                 </button>
-                                                <Icon name="skip-forward" className="w-6 h-6 text-zinc-700 cursor-pointer active:scale-90" onClick={() => setCurrentIndex(prev => (prev < songs.length - 1 ? prev + 1 : 0))} />
+                                                <div className="cursor-pointer text-zinc-700 hover:text-white transition-colors active:scale-90 p-2" onClick={() => setCurrentIndex(prev => (prev < songs.length - 1 ? prev + 1 : 0))}>
+                                                    <SvgIcon type="skipForward" className="w-6 h-6 md:w-7 md:h-7" />
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
                                 </div>
 
-                                <div className={`w-full lg:w-[60%] h-[40vh] lg:h-[750px] flex flex-col transition-all duration-1000 ${animStage !== 'none' ? 'opacity-0 blur-sm' : 'opacity-100 blur-0'}`}>
-                                    <div ref={lyricContainerRef} className="flex-1 overflow-y-auto no-scrollbar pt-[15vh] pb-[40vh] space-y-8 lg:space-y-12" style={{ maskImage: 'linear-gradient(to bottom, transparent, black 25%, black 65%, transparent)' }}>
+                                {/* 上方：歌词区 (移动端高度自动填充，加遮罩) */}
+                                <div className={`flex-1 w-full lg:w-[60%] flex flex-col transition-all duration-1000 ${animStage !== 'none' ? 'opacity-0 blur-sm' : 'opacity-100 blur-0'}`}>
+                                    <div ref={lyricContainerRef} className="flex-1 overflow-y-auto no-scrollbar lyric-mask pt-[10vh] pb-[30vh] space-y-8 md:space-y-14" >
                                         {parsedLyrics.length > 0 ? parsedLyrics.map((line, index) => (
-                                            <div key={index} className={`text-center transition-all duration-700 px-6 uppercase leading-tight ${index === activeLyricIndex ? 'text-white opacity-100 scale-105 font-black text-xl md:text-3xl' : 'text-zinc-500 opacity-40 scale-95 font-bold text-lg md:text-2xl'}`}>
+                                            <div key={index} className={`text-center transition-all duration-700 px-6 uppercase leading-tight tracking-wide ${index === activeLyricIndex ? 'text-white opacity-100 scale-105 font-black text-xl md:text-4xl' : 'text-zinc-500 opacity-40 scale-95 font-bold text-lg md:text-3xl'}`}>
                                                 {line.text}
                                             </div>
-                                        )) : <div className="h-full flex items-center justify-center text-zinc-900 font-bold italic">NO DATA</div>}
+                                        )) : <div className="h-full flex items-center justify-center text-zinc-900 font-bold italic tracking-widest text-lg">NO DATA</div>}
                                     </div>
                                 </div>
                             </div>
@@ -326,7 +358,7 @@
                             src={currentAudioUrl} 
                             onTimeUpdate={handleTimeUpdate} 
                             onLoadedMetadata={(e) => setDuration(e.target.duration)} 
-                            onEnded={() => { setIsPlaying(false); setCurrentIndex(prev => (prev < songs.length - 1 ? prev + 1 : 0)); }}
+                            onEnded={() => { setCurrentIndex(prev => (prev < songs.length - 1 ? prev + 1 : 0)); }}
                             onPlay={() => setIsPlaying(true)}
                             onPause={() => setIsPlaying(false)}
                         />
